@@ -1,0 +1,246 @@
+import fieldMapping from '../lib/field-mapping.json'
+
+const BUTTON_HOST_ID = 'sextant-autofill-root'
+
+function sendMsg(msg) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(msg, (res) => {
+        if (chrome.runtime.lastError) resolve(null)
+        else resolve(res)
+      })
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+function normalize(text) {
+  return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function getFieldLabel(el) {
+  if (el.getAttribute('aria-label')) return el.getAttribute('aria-label')
+  if (el.id) {
+    const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
+    if (lbl) return lbl.innerText || lbl.textContent
+  }
+  const parentLabel = el.closest('label')
+  if (parentLabel) return parentLabel.innerText || parentLabel.textContent
+  const fieldset = el.closest('fieldset')
+  if (fieldset) {
+    const legend = fieldset.querySelector('legend')
+    if (legend) return legend.innerText || legend.textContent
+  }
+  return el.placeholder || el.name || el.id || ''
+}
+
+function findBestMatch(labelText) {
+  const normalLabel = normalize(labelText)
+  if (!normalLabel) return { key: null, confidence: 0 }
+
+  let bestKey = null
+  let bestScore = 0
+
+  for (const [key, synonyms] of Object.entries(fieldMapping)) {
+    for (const synonym of synonyms) {
+      const normSyn = normalize(synonym)
+      if (normalLabel.includes(normSyn) || normSyn.includes(normalLabel)) {
+        const score = normSyn.length / Math.max(normalLabel.length, normSyn.length)
+        if (score > bestScore) { bestScore = score; bestKey = key }
+      }
+    }
+  }
+  return { key: bestKey, confidence: bestScore }
+}
+
+function getProfileValue(key, profile) {
+  const p = profile.personal || {}
+  switch (key) {
+    case 'firstName':           return p.firstName || ''
+    case 'lastName':            return p.lastName || ''
+    case 'email':               return p.email || ''
+    case 'phone':               return p.phone || ''
+    case 'location':            return p.location || ''
+    case 'linkedinUrl':         return p.linkedinUrl || ''
+    case 'workAuthorization':   return p.workAuthorization || ''
+    case 'salaryExpectationMin': return String(p.salaryExpectationMin || '')
+    case 'summary':             return profile.summary || ''
+    case 'noticePeriod':        return ''
+    case 'whyThisCompany':      return ''
+    case 'whyLeavingCurrentRole': return ''
+    default: return ''
+  }
+}
+
+function isEssayField(el) {
+  return el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')
+}
+
+function fillInput(el, value) {
+  if (!value) return
+  const setter =
+    Object.getOwnPropertyDescriptor(
+      el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
+      'value'
+    )?.set
+  if (setter) setter.call(el, value)
+  else el.value = value
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+  el.dispatchEvent(new Event('change', { bubbles: true }))
+}
+
+function fillSelect(el, value) {
+  const normVal = normalize(value)
+  for (const opt of el.options) {
+    if (normalize(opt.text).includes(normVal) || normVal.includes(normalize(opt.text))) {
+      el.value = opt.value
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+      return true
+    }
+  }
+  return false
+}
+
+function markField(el, type) {
+  el.parentElement?.querySelector('[data-sextant-mark]')?.remove()
+
+  const colors = { filled: '#22c55e', unfilled: '#eab308', essay: '#3b82f6' }
+  const icons  = { filled: '✓', unfilled: '?', essay: '✎' }
+
+  el.style.outline = `2px solid ${colors[type]}`
+  el.style.outlineOffset = '2px'
+
+  const mark = document.createElement('span')
+  mark.setAttribute('data-sextant-mark', type)
+  mark.style.cssText = `
+    display:inline-flex;align-items:center;justify-content:center;
+    width:18px;height:18px;border-radius:50%;
+    background:${colors[type]};color:#fff;font-size:11px;font-weight:700;
+    position:absolute;top:-6px;right:-6px;z-index:9999;pointer-events:none;
+  `
+  mark.textContent = icons[type]
+
+  const wrapper = el.parentElement
+  if (wrapper && getComputedStyle(wrapper).position === 'static') wrapper.style.position = 'relative'
+  wrapper?.appendChild(mark)
+}
+
+async function addDraftButton(el, profile, jobDescription, jobId) {
+  if (el.parentElement?.querySelector('[data-sextant-draft]')) return
+
+  const btn = document.createElement('button')
+  btn.setAttribute('data-sextant-draft', '1')
+  btn.textContent = '✨ Draft with AI'
+  btn.style.cssText = `
+    display:inline-block;margin-top:4px;padding:4px 10px;
+    background:#3b82f6;color:#fff;border:none;border-radius:6px;
+    font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;
+  `
+
+  btn.addEventListener('click', async () => {
+    btn.textContent = 'Drafting…'
+    btn.disabled = true
+
+    const questionText = getFieldLabel(el)
+    const payload = jobId
+      ? { jobId, questionText }
+      : { jobDescription: jobDescription || '', questionText }
+
+    const res = await sendMsg({ type: 'DRAFT_ANSWER', payload })
+
+    if (res?.error) {
+      btn.textContent = `⚠ ${res.error.slice(0, 60)}`
+      setTimeout(() => { btn.textContent = '✨ Draft with AI'; btn.disabled = false }, 4000)
+      return
+    }
+
+    fillInput(el, res?.draft || '')
+    markField(el, 'filled')
+    btn.textContent = '✓ Drafted'
+  })
+
+  el.insertAdjacentElement('afterend', btn)
+}
+
+async function runAutofill() {
+  const profileRes = await sendMsg({ type: 'GET_PROFILE' })
+  if (!profileRes?.profile) {
+    alert('Sextant: Profile not loaded. Check your API settings.')
+    return
+  }
+  const profile = profileRes.profile
+
+  // Try to find a saved job matching this page for AI draft context
+  const jobsRes = await sendMsg({ type: 'GET_JOBS' })
+  const jobs = jobsRes?.jobs || []
+  const currentJob = jobs.find((j) => j.url && location.href.startsWith(j.url.split('?')[0]))
+  const jobDescription = currentJob?.description || ''
+  const jobId = currentJob?.id
+
+  const inputs = document.querySelectorAll(
+    'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]),' +
+    'textarea, select'
+  )
+
+  inputs.forEach((el) => {
+    if (!el.offsetParent) return
+
+    const label = getFieldLabel(el)
+    const { key, confidence } = findBestMatch(label)
+
+    if (el.tagName === 'SELECT') {
+      if (key && confidence > 0.5) {
+        const val = getProfileValue(key, profile)
+        markField(el, fillSelect(el, val) ? 'filled' : 'unfilled')
+      } else {
+        markField(el, 'unfilled')
+      }
+      return
+    }
+
+    if (key && confidence > 0.6) {
+      const val = getProfileValue(key, profile)
+      if (val) {
+        fillInput(el, val)
+        markField(el, 'filled')
+      } else {
+        markField(el, 'unfilled')
+        if (isEssayField(el)) addDraftButton(el, profile, jobDescription, jobId)
+      }
+    } else if (isEssayField(el)) {
+      markField(el, 'essay')
+      addDraftButton(el, profile, jobDescription, jobId)
+    } else {
+      markField(el, 'unfilled')
+    }
+  })
+}
+
+function injectFloatingButton() {
+  if (document.getElementById(BUTTON_HOST_ID)) return
+
+  const host = document.createElement('div')
+  host.id = BUTTON_HOST_ID
+  document.body.appendChild(host)
+
+  const shadow = host.attachShadow({ mode: 'closed' })
+  shadow.innerHTML = `
+    <style>
+      :host { all: initial; }
+      #fab {
+        position: fixed; bottom: 80px; left: 20px; z-index: 2147483647;
+        background: #1e3a5f; color: #fff; border: none; border-radius: 12px;
+        padding: 10px 16px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        font-size: 13px; font-weight: 600; cursor: pointer;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.2); display: flex; align-items: center; gap: 6px;
+        transition: background 0.15s, transform 0.1s;
+      }
+      #fab:hover { background: #2d5282; transform: translateY(-1px); }
+    </style>
+    <button id="fab">🧭 Fill Form</button>
+  `
+  shadow.getElementById('fab').addEventListener('click', runAutofill)
+}
+
+injectFloatingButton()
