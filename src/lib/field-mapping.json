@@ -1,0 +1,14 @@
+{
+  "firstName": ["first name", "given name", "fname", "first"],
+  "lastName": ["last name", "surname", "family name", "lname", "last"],
+  "email": ["email", "e-mail", "email address"],
+  "phone": ["phone", "mobile", "telephone", "phone number", "cell"],
+  "location": ["location", "city", "current location", "address", "where are you located"],
+  "linkedinUrl": ["linkedin", "linkedin url", "linkedin profile", "linkedin profile url"],
+  "workAuthorization": ["work authorization", "work authorisation", "visa", "visa status", "sponsorship", "right to work", "employment eligibility", "authorized to work"],
+  "salaryExpectationMin": ["salary expectation", "desired salary", "compensation expectation", "expected salary", "salary requirement", "compensation"],
+  "summary": ["cover letter", "about yourself", "tell us about yourself", "professional summary", "background", "introduce yourself"],
+  "noticePeriod": ["notice period", "available to start", "start date", "earliest start", "when can you start"],
+  "whyThisCompany": ["why do you want to work", "why are you interested", "why this company", "why us", "motivation", "why do you want to join"],
+  "whyLeavingCurrentRole": ["why are you leaving", "reason for leaving", "why leave", "why looking"]
+}

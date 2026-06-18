@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "Sextant",
+  "version": "1.0.0",
+  "description": "Job match scoring and autofill for LinkedIn and ATS platforms.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "*://www.linkedin.com/jobs/*",
+    "https://*.greenhouse.io/*",
+    "https://*.lever.co/*",
+    "https://*.myworkdayjobs.com/*",
+    "https://*.icims.com/*",
+    "https://*.smartrecruiters.com/*",
+    "https://*.ashbyhq.com/*",
+    "https://*.bamboohr.com/*"
+  ],
+  "background": {
+    "service_worker": "dist/background/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "dist/popup/index.html",
+    "default_title": "Sextant",
+    "default_icon": {
+      "16": "public/icons/icon.svg",
+      "48": "public/icons/icon.svg",
+      "128": "public/icons/icon.svg"
+    }
+  },
+  "icons": {
+    "16": "public/icons/icon.svg",
+    "48": "public/icons/icon.svg",
+    "128": "public/icons/icon.svg"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://www.linkedin.com/jobs/*"],
+      "js": ["dist/content-scripts/linkedin-job-reader.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "*://www.linkedin.com/jobs/*",
+        "https://*.greenhouse.io/*",
+        "https://*.lever.co/*",
+        "https://*.myworkdayjobs.com/*",
+        "https://*.icims.com/*",
+        "https://*.smartrecruiters.com/*",
+        "https://*.ashbyhq.com/*",
+        "https://*.bamboohr.com/*"
+      ],
+      "js": ["dist/content-scripts/autofill-engine.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
