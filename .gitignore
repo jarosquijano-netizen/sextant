@@ -1,4 +1,7 @@
 node_modules/
-dist/
+# dist/ is committed for the extension so it can be loaded unpacked without a build step
+extension/node_modules/
+dashboard/node_modules/
+backend/node_modules/
 .env
 *.env.local
