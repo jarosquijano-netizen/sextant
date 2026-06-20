@@ -336,7 +336,7 @@ function showSkillsBanner(count, total) {
   setTimeout(() => banner.remove(), 3500)
 }
 
-
+async function loadProfile() {
   if (cachedProfile) return cachedProfile
   const res = await sendMsg({ type: 'GET_PROFILE' })
   if (res?.profile) cachedProfile = res.profile
