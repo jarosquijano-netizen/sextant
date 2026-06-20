@@ -69,14 +69,37 @@ function ScoreBadge({ score }) {
 function AddJobModal({ onClose, onSaved }) {
   const [form, setForm] = useState({ title: '', company: '', url: '', description: '', status: 'saved' })
   const [saving, setSaving] = useState(false)
+  const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState('')
+  const [captureMsg, setCaptureMsg] = useState('')
 
   useEffect(() => {
     chrome.tabs?.query({ active: true, currentWindow: true }, ([tab]) => {
       if (!tab) return
-      setForm((f) => ({ ...f, url: tab.url || '', title: f.title || '' }))
+      setForm((f) => ({ ...f, url: tab.url || '' }))
     })
   }, [])
+
+  async function captureFromPage() {
+    setCapturing(true); setCaptureMsg(''); setError('')
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+    if (!tab) { setError('No active tab found.'); setCapturing(false); return }
+    chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_JOB_INFO' }, (res) => {
+      if (chrome.runtime.lastError || !res) {
+        setError('Could not read page — make sure you are on a job posting page.')
+        setCapturing(false); return
+      }
+      setForm((f) => ({
+        ...f,
+        title: res.title || f.title,
+        company: res.company || f.company,
+        description: res.description || f.description,
+        url: res.url || f.url,
+      }))
+      setCaptureMsg('✓ Page captured — review and save.')
+      setCapturing(false)
+    })
+  }
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
 
@@ -97,6 +120,15 @@ function AddJobModal({ onClose, onSaved }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8' }}>×</button>
         </div>
         <div style={{ padding: '12px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+
+          {/* Capture from page */}
+          <button onClick={captureFromPage} disabled={capturing}
+            style={{ padding: '9px 0', background: '#f0fdf4', color: '#15803d', border: '1.5px solid #86efac', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: capturing ? 'default' : 'pointer', fontFamily: 'inherit', opacity: capturing ? 0.7 : 1 }}>
+            {capturing ? 'Reading page…' : '📄 Capture job info from current page'}
+          </button>
+          {captureMsg && <div style={{ fontSize: 11, color: '#15803d', fontWeight: 600 }}>{captureMsg}</div>}
+          <div style={{ borderTop: '1px solid #e2e8f0', margin: '0 0 2px' }} />
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <div>
               <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 3, textTransform: 'uppercase' }}>Job Title *</div>

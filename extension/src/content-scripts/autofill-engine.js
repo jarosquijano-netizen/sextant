@@ -328,7 +328,7 @@ function injectFloatingButton() {
   shadow.getElementById('fab').addEventListener('click', runAutofill)
 }
 
-// Listen for INSERT_COVER_LETTER from popup
+// Listen for messages from popup
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type === 'INSERT_COVER_LETTER') {
     const textarea = findCoverLetterTextarea()
@@ -338,13 +338,89 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       textarea.scrollIntoView({ behavior: 'smooth', block: 'center' })
       sendResponse({ ok: true })
     } else {
-      // No textarea found — copy to clipboard as fallback
       navigator.clipboard.writeText(msg.text).catch(() => {})
       sendResponse({ ok: false, fallback: 'clipboard' })
     }
   }
+
+  if (msg.type === 'EXTRACT_JOB_INFO') {
+    sendResponse(extractJobInfo())
+  }
+
   return true
 })
+
+function extractJobInfo() {
+  const url = location.href
+  const text = (s) => document.querySelector(s)?.innerText?.trim() || ''
+  const texts = (s) => [...document.querySelectorAll(s)].map((e) => e.innerText?.trim()).filter(Boolean)
+
+  // ── Title ──────────────────────────────────────────────────────────────────
+  const titleSelectors = [
+    '[data-testid="job-title"]', '[class*="job-title"]', '[class*="jobtitle"]',
+    '[class*="position-title"]', '[class*="posting-title"]',
+    'h1[class*="title"]', 'h1[class*="job"]', 'h1[class*="role"]',
+    '.job-details-jobs-unified-top-card__job-title h1',  // LinkedIn detail
+    'h1',
+  ]
+  let title = ''
+  for (const s of titleSelectors) {
+    title = text(s)
+    if (title && title.length < 120) break
+  }
+  if (!title) title = document.title.split(/[|\-–—@]/)[0].trim()
+
+  // ── Company ────────────────────────────────────────────────────────────────
+  const companySelectors = [
+    '[data-testid="company-name"]', '[class*="company-name"]', '[class*="employer-name"]',
+    '[class*="organization-name"]', '[class*="companyName"]',
+    '.job-details-jobs-unified-top-card__company-name a', // LinkedIn
+    '[class*="company"] a', '[class*="company"] span',
+    '[itemprop="hiringOrganization"] [itemprop="name"]',
+  ]
+  let company = ''
+  for (const s of companySelectors) {
+    company = text(s)
+    if (company && company.length < 100) break
+  }
+
+  // ── Description ────────────────────────────────────────────────────────────
+  const descSelectors = [
+    '[data-testid="job-description"]', '[class*="job-description"]',
+    '[class*="jobDescription"]', '[class*="job_description"]',
+    '[class*="description-content"]', '[class*="posting-content"]',
+    '[class*="job-details"]', '[class*="jobDetails"]',
+    '.jobs-description__content',  // LinkedIn
+    '[class*="content"] article', 'article',
+    'main',
+  ]
+  let description = ''
+  for (const s of descSelectors) {
+    const el = document.querySelector(s)
+    if (!el) continue
+    const t = el.innerText?.trim() || ''
+    if (t.length > 200) { description = t; break }
+  }
+  // Fallback: grab all visible paragraphs that look like job content
+  if (!description) {
+    description = texts('p, li').filter((t) => t.length > 40).slice(0, 40).join('\n')
+  }
+  // Trim to 8000 chars to stay within API limits
+  description = description.slice(0, 8000)
+
+  // ── Location ───────────────────────────────────────────────────────────────
+  const locationSelectors = [
+    '[data-testid="job-location"]', '[class*="job-location"]', '[class*="location"]',
+    '.job-details-jobs-unified-top-card__primary-description-without-tagline', // LinkedIn
+  ]
+  let location = ''
+  for (const s of locationSelectors) {
+    location = text(s)
+    if (location && location.length < 100) break
+  }
+
+  return { title, company, description, location, url }
+}
 
 function findCoverLetterTextarea() {
   const coverKeywords = ['cover letter', 'cover_letter', 'coverletter', 'motivation', 'carta', 'lettre', 'anschreiben', 'why', 'about yourself', 'introduce']
