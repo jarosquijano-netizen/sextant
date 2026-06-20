@@ -251,7 +251,92 @@ function processField(el, profile, jobDescription, jobId) {
   }
 }
 
-async function loadProfile() {
+// ── Skill list matching ──────────────────────────────────────────────────────
+// Flattens all skills from the profile into a single normalized list
+function getAllProfileSkills(profile) {
+  const skills = profile.skills || {}
+  return Object.values(skills).flat().map((s) => normalize(s))
+}
+
+function skillMatches(optionText, profileSkills) {
+  const norm = normalize(optionText)
+  if (!norm) return false
+  return profileSkills.some((s) => {
+    // exact or substring match both ways
+    return norm === s || norm.includes(s) || s.includes(norm)
+  })
+}
+
+// Handle checkbox/radio groups that look like skill pickers
+function fillSkillCheckboxes(profile) {
+  const profileSkills = getAllProfileSkills(profile)
+  if (!profileSkills.length) return
+
+  // Find all unchecked checkboxes whose label matches a profile skill
+  const boxes = document.querySelectorAll('input[type=checkbox]:not([data-sextant-skill])')
+  let filled = 0
+  boxes.forEach((cb) => {
+    if (!cb.offsetParent) return
+    const label = getFieldLabel(cb)
+    if (!label) return
+    if (skillMatches(label, profileSkills)) {
+      cb.setAttribute('data-sextant-skill', '1')
+      if (!cb.checked) {
+        cb.checked = true
+        cb.dispatchEvent(new Event('change', { bubbles: true }))
+        cb.dispatchEvent(new Event('input', { bubbles: true }))
+        filled++
+      }
+      markField(cb, 'filled')
+    }
+  })
+
+  // Handle tag/chip style buttons (common in Greenhouse, Lever, Ashby)
+  // These are <button> or <div role="checkbox"> elements inside a "skills" section
+  const skillSectionKeywords = ['skill', 'technology', 'tool', 'language', 'framework', 'competenc']
+  document.querySelectorAll('[role="checkbox"]:not([data-sextant-skill]), [role="option"]:not([data-sextant-skill])').forEach((el) => {
+    if (!el.offsetParent) return
+    // Check if this element is inside a skills-related container
+    const container = el.closest('[class*="skill"],[class*="tech"],[class*="tag"],[class*="competenc"],[class*="language"]')
+      || el.parentElement
+    const containerLabel = normalize(container?.getAttribute('aria-label') || container?.className || '')
+    const inSkillSection = skillSectionKeywords.some((kw) => containerLabel.includes(kw))
+
+    const optText = el.getAttribute('aria-label') || el.innerText || el.textContent || ''
+    if (skillMatches(optText, profileSkills)) {
+      el.setAttribute('data-sextant-skill', '1')
+      const isChecked = el.getAttribute('aria-checked') === 'true' || el.classList.contains('selected') || el.classList.contains('active')
+      if (!isChecked) {
+        el.click()
+        filled++
+      }
+      el.style.outline = '2px solid #22c55e'
+      el.style.outlineOffset = '2px'
+    }
+  })
+
+  return filled
+}
+
+// ── Skills summary banner ────────────────────────────────────────────────────
+function showSkillsBanner(count, total) {
+  document.querySelector('[data-sextant-skills-banner]')?.remove()
+  if (!count) return
+  const banner = document.createElement('div')
+  banner.setAttribute('data-sextant-skills-banner', '1')
+  banner.style.cssText = `
+    position:fixed;bottom:140px;left:20px;z-index:2147483647;
+    background:#22c55e;color:#fff;border-radius:10px;
+    padding:8px 14px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    font-size:12px;font-weight:600;box-shadow:0 4px 12px rgba(0,0,0,0.2);
+    animation:fadein 0.2s ease;
+  `
+  banner.textContent = `✓ ${count} skill${count !== 1 ? 's' : ''} matched & selected`
+  document.body.appendChild(banner)
+  setTimeout(() => banner.remove(), 3500)
+}
+
+
   if (cachedProfile) return cachedProfile
   const res = await sendMsg({ type: 'GET_PROFILE' })
   if (res?.profile) cachedProfile = res.profile
@@ -294,6 +379,10 @@ async function runAutofill() {
     'textarea, select'
   )
   inputs.forEach((el) => processField(el, profile, jobDescription, jobId))
+
+  // Skill checkboxes / tag pickers
+  const skillsMatched = fillSkillCheckboxes(profile)
+  showSkillsBanner(skillsMatched)
 }
 
 function attachClickToFillAll() {
