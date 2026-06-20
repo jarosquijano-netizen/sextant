@@ -174,11 +174,88 @@ function CoverLetterModal({ jobId, initialJobTitle, initialCompany, initialDesc,
   )
 }
 
+function AddJobModal({ onClose, onSaved }) {
+  const [form, setForm] = useState({ title: '', company: '', url: '', description: '', status: 'saved' })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    // Pre-fill URL and title from current tab
+    chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
+      if (!tab) return
+      setForm((f) => ({ ...f, url: tab.url || '', title: f.title || tab.title || '' }))
+    })
+  }, [])
+
+  function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
+
+  async function save() {
+    if (!form.title || !form.company) { setError('Title and company are required.'); return }
+    setSaving(true)
+    setError('')
+    const res = await sendMsg({ type: 'SAVE_JOB', job: form })
+    if (res?.error) { setError(res.error); setSaving(false); return }
+    onSaved(res.job)
+    onClose()
+  }
+
+  const inp = (placeholder, k, opts = {}) => (
+    <input value={form[k]} onChange={(e) => set(k, e.target.value)} placeholder={placeholder}
+      style={{ width: '100%', padding: '7px 10px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', boxSizing: 'border-box', ...opts.style }} />
+  )
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 12, overflowY: 'auto' }}>
+      <div style={{ background: '#fff', borderRadius: 14, width: '100%', boxShadow: '0 8px 40px rgba(0,0,0,0.25)', marginTop: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px 0' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>+ Add Job</div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#94a3b8', lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ padding: '12px 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 3, textTransform: 'uppercase' }}>Job Title *</div>
+              {inp('VP Product', 'title')}
+            </div>
+            <div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 3, textTransform: 'uppercase' }}>Company *</div>
+              {inp('Acme Corp', 'company')}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 3, textTransform: 'uppercase' }}>URL</div>
+            {inp('https://…', 'url')}
+          </div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 3, textTransform: 'uppercase' }}>Status</div>
+            <select value={form.status} onChange={(e) => set('status', e.target.value)}
+              style={{ width: '100%', padding: '7px 10px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit' }}>
+              {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#64748b', marginBottom: 3, textTransform: 'uppercase' }}>Job Description (paste for AI features)</div>
+            <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={4}
+              placeholder="Paste the job description here to enable cover letters, match scoring, and AI answers…"
+              style={{ width: '100%', padding: '7px 10px', border: '1.5px solid #e2e8f0', borderRadius: 7, fontSize: 12, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }} />
+          </div>
+          {error && <div style={{ background: '#fef2f2', border: '1.5px solid #fecaca', borderRadius: 7, padding: '8px 10px', fontSize: 12, color: '#dc2626' }}>{error}</div>}
+          <button onClick={save} disabled={saving}
+            style={{ padding: '9px 0', background: '#1e3a5f', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.7 : 1, fontFamily: 'inherit' }}>
+            {saving ? 'Saving…' : 'Save to Pipeline'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function Pipeline() {
   const [jobs, setJobs] = useState([])
   const [loading, setLoading] = useState(true)
-  const [coverLetterJob, setCoverLetterJob] = useState(null) // { jobId, title, company } or 'new'
+  const [coverLetterJob, setCoverLetterJob] = useState(null)
   const [showNewCoverLetter, setShowNewCoverLetter] = useState(false)
+  const [showAddJob, setShowAddJob] = useState(false)
 
   useEffect(() => {
     sendMsg({ type: 'GET_JOBS' }).then((res) => {
@@ -192,11 +269,16 @@ export default function Pipeline() {
     setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, status } : j)))
   }
 
+  function handleJobSaved(job) {
+    setJobs((prev) => [job, ...prev])
+  }
+
   if (loading) return <div style={{ color: '#94a3b8', fontSize: 13 }}>Loading pipeline…</div>
 
   return (
     <div>
-      {/* Modal */}
+      {/* Modals */}
+      {showAddJob && <AddJobModal onClose={() => setShowAddJob(false)} onSaved={handleJobSaved} />}
       {(coverLetterJob || showNewCoverLetter) && (
         <CoverLetterModal
           jobId={coverLetterJob?.id}
@@ -206,11 +288,17 @@ export default function Pipeline() {
         />
       )}
 
-      {/* Quick cover letter — no saved job needed */}
-      <button onClick={() => setShowNewCoverLetter(true)}
-        style={{ width: '100%', marginBottom: 12, padding: '9px 0', background: '#f0f9ff', color: '#0369a1', border: '1.5px solid #bae6fd', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
-        ✉ Write a Cover Letter (paste job description)
-      </button>
+      {/* Action bar */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+        <button onClick={() => setShowAddJob(true)}
+          style={{ flex: 1, padding: '9px 0', background: '#1e3a5f', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+          + Add Job
+        </button>
+        <button onClick={() => setShowNewCoverLetter(true)}
+          style={{ flex: 1, padding: '9px 0', background: '#f0f9ff', color: '#0369a1', border: '1.5px solid #bae6fd', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}>
+          ✉ Cover Letter
+        </button>
+      </div>
 
       {!jobs.length ? (
         <div style={{ textAlign: 'center', padding: '40px 16px', color: '#94a3b8' }}>
