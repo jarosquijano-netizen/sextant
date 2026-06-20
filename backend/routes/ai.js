@@ -24,26 +24,41 @@ async function storeArtifact(jobId, kind, content) {
 // POST /ai/cover-letter
 router.post('/cover-letter', async (req, res) => {
   try {
-    const { jobId } = req.body
-    if (!jobId) return res.status(400).json({ error: 'jobId is required' })
+    const { jobId, jobTitle, company, jobDescription, tone = 'professional', regenerate = false } = req.body
 
-    const [profile, job] = await Promise.all([getProfile(), getJob(jobId)])
-    if (!job) return res.status(404).json({ error: 'Job not found' })
+    const profile = await getProfile()
 
-    const prior = await query(
-      'SELECT content FROM ai_artifacts WHERE job_id = $1 AND kind = $2 ORDER BY created_at DESC LIMIT 1',
-      [jobId, 'cover_letter']
-    )
-    if (prior.rows.length) return res.json(prior.rows[0].content)
+    let jobInfo = { title: jobTitle || '', company: company || '', description: jobDescription || '' }
+
+    if (jobId) {
+      const job = await getJob(jobId)
+      if (!job) return res.status(404).json({ error: 'Job not found' })
+      jobInfo = { title: job.title || jobTitle || '', company: job.company || company || '', description: job.description || jobDescription || '' }
+
+      // Return cached artifact unless regenerate is requested
+      if (!regenerate) {
+        const prior = await query(
+          `SELECT content FROM ai_artifacts WHERE job_id = $1 AND kind = $2 AND content->>'tone' = $3 ORDER BY created_at DESC LIMIT 1`,
+          [jobId, 'cover_letter', tone]
+        )
+        if (prior.rows.length) return res.json(prior.rows[0].content)
+      }
+    }
+
+    const toneInstructions = {
+      professional: 'Write in a polished, confident, and formal tone. Focus on business impact and leadership.',
+      enthusiastic: 'Write with genuine enthusiasm and energy. Show passion for the company mission and role.',
+      concise: 'Write very concisely — 2 short paragraphs, under 120 words total. Every sentence must earn its place.',
+    }
 
     const draft = await callClaude({
-      system: `You are a professional cover letter writer. Write a concise, specific cover letter (3 short paragraphs, ~200 words) based on the applicant's profile and the job description. Use the applicant's real experience. No generic filler. End with the letter only.`,
-      user: `Applicant profile:\n${JSON.stringify(profile, null, 2)}\n\nJob: ${job.title} at ${job.company}\nJob description:\n${job.description || 'Not available'}`,
-      maxTokens: 800,
+      system: `You are an expert cover letter writer. ${toneInstructions[tone] || toneInstructions.professional} Use the applicant's real experience and achievements — no generic filler. Write the letter only, no subject line, no "Dear Hiring Manager" unless the company name is known. End with a confident closing line.`,
+      user: `Applicant profile:\n${JSON.stringify(profile, null, 2)}\n\nRole: ${jobInfo.title} at ${jobInfo.company || 'the company'}\nJob description:\n${(jobInfo.description || 'Not provided').slice(0, 4000)}`,
+      maxTokens: 900,
     })
 
-    const content = { draft }
-    await storeArtifact(jobId, 'cover_letter', content)
+    const content = { draft, tone, jobTitle: jobInfo.title, company: jobInfo.company }
+    if (jobId) await storeArtifact(jobId, 'cover_letter', content)
     res.json(content)
   } catch (err) {
     console.error('/ai/cover-letter error:', err.message)

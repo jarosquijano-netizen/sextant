@@ -328,6 +328,42 @@ function injectFloatingButton() {
   shadow.getElementById('fab').addEventListener('click', runAutofill)
 }
 
+// Listen for INSERT_COVER_LETTER from popup
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type === 'INSERT_COVER_LETTER') {
+    const textarea = findCoverLetterTextarea()
+    if (textarea) {
+      fillInput(textarea, msg.text)
+      markField(textarea, 'filled')
+      textarea.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      sendResponse({ ok: true })
+    } else {
+      // No textarea found — copy to clipboard as fallback
+      navigator.clipboard.writeText(msg.text).catch(() => {})
+      sendResponse({ ok: false, fallback: 'clipboard' })
+    }
+  }
+  return true
+})
+
+function findCoverLetterTextarea() {
+  const coverKeywords = ['cover letter', 'cover_letter', 'coverletter', 'motivation', 'carta', 'lettre', 'anschreiben', 'why', 'about yourself', 'introduce']
+  const all = document.querySelectorAll('textarea')
+  for (const ta of all) {
+    if (!ta.offsetParent) continue
+    const label = normalize(getFieldLabel(ta))
+    if (coverKeywords.some((kw) => label.includes(kw))) return ta
+  }
+  // Fallback: largest visible textarea
+  let best = null, bestSize = 0
+  for (const ta of all) {
+    if (!ta.offsetParent) continue
+    const size = ta.offsetWidth * ta.offsetHeight
+    if (size > bestSize) { bestSize = size; best = ta }
+  }
+  return best
+}
+
 // Init
 injectFloatingButton()
 attachClickToFillAll()
