@@ -3,7 +3,7 @@
   "name": "Sextant",
   "version": "1.0.0",
   "description": "Job match scoring and autofill for LinkedIn and ATS platforms.",
-  "permissions": ["storage", "activeTab", "tabs"],
+  "permissions": ["storage", "activeTab", "tabs", "scripting"],
   "host_permissions": [
     "*://www.linkedin.com/jobs/*",
     "<all_urls>"

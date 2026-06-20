@@ -82,13 +82,51 @@ function AddJobModal({ onClose, onSaved }) {
 
   async function captureFromPage() {
     setCapturing(true); setCaptureMsg(''); setError('')
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (!tab) { setError('No active tab found.'); setCapturing(false); return }
-    chrome.tabs.sendMessage(tab.id, { type: 'EXTRACT_JOB_INFO' }, (res) => {
-      if (chrome.runtime.lastError || !res) {
-        setError('Could not read page — make sure you are on a job posting page.')
-        setCapturing(false); return
-      }
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id) throw new Error('No active tab found.')
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const t = (s) => document.querySelector(s)?.innerText?.trim() || ''
+          const texts = (s) => [...document.querySelectorAll(s)].map(e => e.innerText?.trim()).filter(Boolean)
+
+          // Title
+          const titleSels = ['[data-testid="job-title"]','[class*="job-title"] h1','[class*="jobtitle"]','[class*="position-title"]','h1[class*="title"]','h1[class*="job"]','h1']
+          let title = ''
+          for (const s of titleSels) { title = t(s); if (title && title.length < 150) break }
+          if (!title) title = document.title.split(/[|\-–—@]/)[0].trim()
+
+          // Company
+          const companySels = ['[data-testid="company-name"]','[class*="company-name"]','[class*="employer-name"]','[class*="companyName"]','.job-details-jobs-unified-top-card__company-name a','[itemprop="hiringOrganization"] [itemprop="name"]']
+          let company = ''
+          for (const s of companySels) { company = t(s); if (company && company.length < 120) break }
+
+          // Description
+          const descSels = ['[data-testid="job-description"]','[class*="job-description"]','[class*="jobDescription"]','[class*="description-content"]','[class*="posting-content"]','.jobs-description__content','[class*="job-details"]','article','main']
+          let description = ''
+          for (const s of descSels) {
+            const el = document.querySelector(s)
+            if (!el) continue
+            const txt = el.innerText?.trim() || ''
+            if (txt.length > 200) { description = txt; break }
+          }
+          if (!description) description = texts('p,li').filter(t => t.length > 40).slice(0, 40).join('\n')
+          description = description.slice(0, 8000)
+
+          // Location
+          const locSels = ['[data-testid="job-location"]','[class*="job-location"]','[class*="location"]']
+          let location = ''
+          for (const s of locSels) { location = t(s); if (location && location.length < 100) break }
+
+          return { title, company, description, location, url: location.href || window.location.href }
+        },
+      })
+
+      const res = result?.result
+      if (!res) throw new Error('Could not read page content.')
+
       setForm((f) => ({
         ...f,
         title: res.title || f.title,
@@ -96,9 +134,11 @@ function AddJobModal({ onClose, onSaved }) {
         description: res.description || f.description,
         url: res.url || f.url,
       }))
-      setCaptureMsg('✓ Page captured — review and save.')
-      setCapturing(false)
-    })
+      setCaptureMsg('✓ Captured — review and save.')
+    } catch (err) {
+      setError(err.message || 'Could not read page — try on a job posting page.')
+    }
+    setCapturing(false)
   }
 
   function set(k, v) { setForm((f) => ({ ...f, [k]: v })) }
