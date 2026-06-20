@@ -6,24 +6,7 @@
   "permissions": ["storage", "activeTab"],
   "host_permissions": [
     "*://www.linkedin.com/jobs/*",
-    "https://*.greenhouse.io/*",
-    "https://*.lever.co/*",
-    "https://*.myworkdayjobs.com/*",
-    "https://*.icims.com/*",
-    "https://*.smartrecruiters.com/*",
-    "https://*.ashbyhq.com/*",
-    "https://*.bamboohr.com/*",
-    "https://*.personio.com/*",
-    "https://*.personio.de/*",
-    "https://*.workable.com/*",
-    "https://*.recruitee.com/*",
-    "https://*.jobvite.com/*",
-    "https://*.taleo.net/*",
-    "https://*.successfactors.com/*",
-    "https://*.successfactors.eu/*",
-    "https://*.applytojob.com/*",
-    "https://*.pinpointhq.com/*",
-    "https://*.teamtailor.com/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "dist/background/service-worker.js",
@@ -52,27 +35,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": [
-        "*://www.linkedin.com/jobs/*",
-        "https://*.greenhouse.io/*",
-        "https://*.lever.co/*",
-        "https://*.myworkdayjobs.com/*",
-        "https://*.icims.com/*",
-        "https://*.smartrecruiters.com/*",
-        "https://*.ashbyhq.com/*",
-        "https://*.bamboohr.com/*",
-        "https://*.personio.com/*",
-        "https://*.personio.de/*",
-        "https://*.workable.com/*",
-        "https://*.recruitee.com/*",
-        "https://*.jobvite.com/*",
-        "https://*.taleo.net/*",
-        "https://*.successfactors.com/*",
-        "https://*.successfactors.eu/*",
-        "https://*.applytojob.com/*",
-        "https://*.pinpointhq.com/*",
-        "https://*.teamtailor.com/*"
-      ],
+      "matches": ["<all_urls>"],
       "js": ["dist/content-scripts/autofill-engine.js"],
       "run_at": "document_idle"
     }
