@@ -32,7 +32,9 @@ router.get('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   const id = parseInt(req.params.id, 10)
   const { status } = req.body
+  const VALID = ['saved', 'applied', 'screening', 'interview', 'offer', 'rejected']
   if (!status) return res.status(400).json({ error: 'status is required' })
+  if (!VALID.includes(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${VALID.join(', ')}` })
 
   const result = await query(
     'UPDATE jobs SET status = $1, status_updated_at = now() WHERE id = $2 RETURNING *',
