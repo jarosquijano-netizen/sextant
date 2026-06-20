@@ -59,47 +59,35 @@ function findBestMatch(labelText) {
   return { key: bestKey, confidence: bestScore }
 }
 
-function getFirstName(profile) {
-  if (profile.firstName) return profile.firstName
-  const name = profile.name || ''
-  return name.split(' ')[0] || ''
-}
-
-function getLastName(profile) {
-  if (profile.lastName) return profile.lastName
-  const name = profile.name || ''
-  const parts = name.trim().split(' ')
-  return parts.length > 1 ? parts.slice(1).join(' ') : ''
-}
-
 function getProfileValue(key, profile) {
+  const p = profile.personal || {}
   switch (key) {
-    case 'firstName':         return getFirstName(profile)
-    case 'lastName':          return getLastName(profile)
-    case 'fullName':          return profile.name || `${getFirstName(profile)} ${getLastName(profile)}`.trim()
-    case 'email':             return profile.email || ''
-    case 'phone':             return profile.phone || ''
-    case 'location':          return profile.location || ''
+    case 'firstName':         return p.firstName || ''
+    case 'lastName':          return p.lastName || ''
+    case 'fullName':          return `${p.firstName || ''} ${p.lastName || ''}`.trim() || ''
+    case 'email':             return p.email || ''
+    case 'phone':             return p.phone || ''
+    case 'location':          return p.location || ''
     case 'country': {
-      const loc = profile.location || ''
+      const loc = p.location || ''
       const parts = loc.split(',')
       return parts.length > 1 ? parts[parts.length - 1].trim() : loc
     }
-    case 'linkedinUrl':       return profile.linkedin || ''
-    case 'websiteUrl':        return profile.website || ''
-    case 'githubUrl':         return profile.github || ''
+    case 'linkedinUrl':       return p.linkedinUrl || ''
+    case 'websiteUrl':        return p.websiteUrl || ''
+    case 'githubUrl':         return p.githubUrl || ''
     case 'currentTitle': {
       const exp = (profile.experience || [])[0]
-      return exp?.roles?.[0]?.title || profile.title || ''
+      return exp?.title || ''
     }
     case 'currentCompany': {
       const exp = (profile.experience || [])[0]
       return exp?.company || ''
     }
     case 'yearsExperience':   return '19'
-    case 'workAuthorization': return profile.workAuthorization || 'Yes'
-    case 'salaryExpectation': return profile.salaryExpectation || ''
-    case 'noticePeriod':      return profile.noticePeriod || ''
+    case 'workAuthorization': return p.workAuthorization || 'Yes'
+    case 'salaryExpectation': return p.salaryExpectationMin ? String(p.salaryExpectationMin) : ''
+    case 'noticePeriod':      return p.noticePeriod || ''
     case 'summary':           return profile.summary || ''
     case 'whyThisCompany':    return ''
     case 'whyLeavingCurrentRole': return ''
