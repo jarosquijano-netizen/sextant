@@ -23,54 +23,64 @@ async function storeArtifact(jobId, kind, content) {
 
 // POST /ai/cover-letter
 router.post('/cover-letter', async (req, res) => {
-  const { jobId } = req.body
-  if (!jobId) return res.status(400).json({ error: 'jobId is required' })
+  try {
+    const { jobId } = req.body
+    if (!jobId) return res.status(400).json({ error: 'jobId is required' })
 
-  const [profile, job] = await Promise.all([getProfile(), getJob(jobId)])
-  if (!job) return res.status(404).json({ error: 'Job not found' })
+    const [profile, job] = await Promise.all([getProfile(), getJob(jobId)])
+    if (!job) return res.status(404).json({ error: 'Job not found' })
 
-  // Return prior artifact if it exists
-  const prior = await query(
-    'SELECT content FROM ai_artifacts WHERE job_id = $1 AND kind = $2 ORDER BY created_at DESC LIMIT 1',
-    [jobId, 'cover_letter']
-  )
-  if (prior.rows.length) return res.json(prior.rows[0].content)
+    const prior = await query(
+      'SELECT content FROM ai_artifacts WHERE job_id = $1 AND kind = $2 ORDER BY created_at DESC LIMIT 1',
+      [jobId, 'cover_letter']
+    )
+    if (prior.rows.length) return res.json(prior.rows[0].content)
 
-  const draft = await callClaude({
-    system: `You are a professional cover letter writer. Write a concise, specific cover letter (3 short paragraphs, ~200 words) based on the applicant's profile and the job description. Use the applicant's real experience. No generic filler. End with the letter only.`,
-    user: `Applicant profile:\n${JSON.stringify(profile, null, 2)}\n\nJob: ${job.title} at ${job.company}\nJob description:\n${job.description || 'Not available'}`,
-    maxTokens: 800,
-  })
+    const draft = await callClaude({
+      system: `You are a professional cover letter writer. Write a concise, specific cover letter (3 short paragraphs, ~200 words) based on the applicant's profile and the job description. Use the applicant's real experience. No generic filler. End with the letter only.`,
+      user: `Applicant profile:\n${JSON.stringify(profile, null, 2)}\n\nJob: ${job.title} at ${job.company}\nJob description:\n${job.description || 'Not available'}`,
+      maxTokens: 800,
+    })
 
-  const content = { draft }
-  await storeArtifact(jobId, 'cover_letter', content)
-  res.json(content)
+    const content = { draft }
+    await storeArtifact(jobId, 'cover_letter', content)
+    res.json(content)
+  } catch (err) {
+    console.error('/ai/cover-letter error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // POST /ai/draft-answer
 router.post('/draft-answer', async (req, res) => {
-  const { jobId, jobDescription, questionText } = req.body
-  if (!questionText) return res.status(400).json({ error: 'questionText is required' })
+  try {
+    const { jobId, jobDescription, questionText } = req.body
+    if (!questionText) return res.status(400).json({ error: 'questionText is required' })
 
-  const profile = await getProfile()
-  let jobDesc = jobDescription || ''
-  if (jobId && !jobDesc) {
-    const job = await getJob(jobId)
-    jobDesc = job?.description || ''
+    const profile = await getProfile()
+    let jobDesc = jobDescription || ''
+    if (jobId && !jobDesc) {
+      const job = await getJob(jobId)
+      jobDesc = job?.description || ''
+    }
+
+    const draft = await callClaude({
+      system: `You are helping a job applicant answer a specific application form question. Write a concise, honest answer (2-4 sentences unless the question implies more) using the applicant's real profile. Be specific, not generic. Return only the answer text.`,
+      user: `Question: "${questionText}"\n\nApplicant profile:\n${JSON.stringify(profile, null, 2)}\n\nJob context:\n${jobDesc.slice(0, 4000)}`,
+      maxTokens: 400,
+    })
+
+    if (jobId) await storeArtifact(jobId, 'draft_answer', { question: questionText, draft })
+    res.json({ draft })
+  } catch (err) {
+    console.error('/ai/draft-answer error:', err.message)
+    res.status(500).json({ error: err.message })
   }
-
-  const draft = await callClaude({
-    system: `You are helping a job applicant answer a specific application form question. Write a concise, honest answer (2-4 sentences unless the question implies more) using the applicant's real profile. Be specific, not generic. Return only the answer text.`,
-    user: `Question: "${questionText}"\n\nApplicant profile:\n${JSON.stringify(profile, null, 2)}\n\nJob context:\n${jobDesc.slice(0, 4000)}`,
-    maxTokens: 400,
-  })
-
-  if (jobId) await storeArtifact(jobId, 'draft_answer', { question: questionText, draft })
-  res.json({ draft })
 })
 
 // POST /ai/bullet-suggestions
 router.post('/bullet-suggestions', async (req, res) => {
+  try {
   const { jobId, jobDescription } = req.body
 
   const profile = await getProfile()
@@ -91,6 +101,10 @@ router.post('/bullet-suggestions', async (req, res) => {
 
   if (jobId) await storeArtifact(jobId, 'bullet_suggestions', result)
   res.json(result)
+  } catch (err) {
+    console.error('/ai/bullet-suggestions error:', err.message)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // GET /ai/insights

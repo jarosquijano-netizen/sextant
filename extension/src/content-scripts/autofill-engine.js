@@ -20,24 +20,48 @@ function normalize(text) {
   return (text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-function getFieldLabel(el) {
-  if (el.getAttribute('aria-label')) return el.getAttribute('aria-label')
-  if (el.getAttribute('placeholder')) return el.getAttribute('placeholder')
+function getAllLabels(el) {
+  const candidates = []
+
+  // Most specific first: aria-label, placeholder, name attr
+  if (el.getAttribute('aria-label')) candidates.push(el.getAttribute('aria-label'))
+  if (el.getAttribute('placeholder')) candidates.push(el.getAttribute('placeholder'))
+  if (el.getAttribute('name')) candidates.push(el.getAttribute('name'))
+
+  // Explicit label[for=id]
   if (el.id) {
     const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
-    if (lbl) return lbl.innerText || lbl.textContent
+    if (lbl) {
+      const clone = lbl.cloneNode(true)
+      clone.querySelectorAll('input,select,textarea,span[aria-hidden]').forEach(n => n.remove())
+      const txt = (clone.innerText || clone.textContent).trim()
+      if (txt) candidates.push(txt)
+    }
   }
+
+  // Parent label (strip child input text)
   const parentLabel = el.closest('label')
-  if (parentLabel) return parentLabel.innerText || parentLabel.textContent
-  // walk up to find a nearby label sibling
-  let node = el.parentElement
-  for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
-    const lbl = node.querySelector('label')
-    if (lbl && !lbl.contains(el)) return lbl.innerText || lbl.textContent
-    const legend = node.querySelector('legend')
-    if (legend) return legend.innerText || legend.textContent
+  if (parentLabel) {
+    const clone = parentLabel.cloneNode(true)
+    clone.querySelectorAll('input,select,textarea').forEach(n => n.remove())
+    const txt = (clone.innerText || clone.textContent).trim()
+    if (txt) candidates.push(txt)
   }
-  return el.name || el.id || ''
+
+  // Walk up looking for a sibling/ancestor label or legend
+  let node = el.parentElement
+  for (let i = 0; i < 5 && node; i++, node = node.parentElement) {
+    const legend = node.querySelector('legend')
+    if (legend) { candidates.push((legend.innerText || legend.textContent).trim()); break }
+    // label that is a sibling (not containing the input)
+    const sibling = node.querySelector('label')
+    if (sibling && !sibling.contains(el)) {
+      candidates.push((sibling.innerText || sibling.textContent).trim())
+      break
+    }
+  }
+
+  return candidates.filter(Boolean)
 }
 
 function findBestMatch(labelText) {
@@ -57,6 +81,24 @@ function findBestMatch(labelText) {
     }
   }
   return { key: bestKey, confidence: bestScore }
+}
+
+function getFieldLabel(el) {
+  // Try all label sources, return the one that gives the best field match
+  const candidates = getAllLabels(el)
+  if (!candidates.length) return ''
+
+  let bestLabel = candidates[0]
+  let bestScore = 0
+
+  for (const label of candidates) {
+    const { confidence } = findBestMatch(label)
+    if (confidence > bestScore) {
+      bestScore = confidence
+      bestLabel = label
+    }
+  }
+  return bestLabel
 }
 
 function getProfileValue(key, profile) {
