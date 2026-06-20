@@ -19,8 +19,9 @@ const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
 
 app.use(cors({
   origin: (origin, cb) => {
-    // Allow requests with no origin (curl, Postman, extension background service worker)
+    // Allow requests with no origin (curl, Postman, service worker) and all chrome-extension origins
     if (!origin) return cb(null, true)
+    if (origin.startsWith('chrome-extension://')) return cb(null, true)
     if (allowedOrigins.includes(origin)) return cb(null, true)
     cb(new Error(`CORS: origin ${origin} not allowed`))
   },
