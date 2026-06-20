@@ -2,8 +2,26 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
+// Wrap content scripts in an IIFE so their top-level vars don't leak to window
+// (Chrome doesn't support type="module" for content scripts, so ES module
+// scope isolation doesn't apply — without this, two content scripts on the
+// same page share the global scope and minified variable names collide.)
+function iifeWrapContentScripts() {
+  const contentScriptPattern = /content-scripts\//
+  return {
+    name: 'iife-wrap-content-scripts',
+    generateBundle(_, bundle) {
+      for (const [fileName, chunk] of Object.entries(bundle)) {
+        if (chunk.type === 'chunk' && contentScriptPattern.test(fileName)) {
+          chunk.code = `;(function(){\n${chunk.code}\n})();\n`
+        }
+      }
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), iifeWrapContentScripts()],
   base: './',
   build: {
     outDir: 'dist',
@@ -20,13 +38,7 @@ export default defineConfig({
         chunkFileNames: 'chunks/[name]-[hash].js',
         assetFileNames: 'assets/[name][extname]',
         format: 'es',
-        manualChunks: (id) => {
-          // Keep content scripts and service worker self-contained
-          if (id.includes('content-scripts') || id.includes('service-worker')) {
-            return undefined
-          }
-        }
-      }
-    }
-  }
+      },
+    },
+  },
 })
