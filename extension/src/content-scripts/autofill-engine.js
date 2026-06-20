@@ -1,6 +1,7 @@
 import fieldMapping from '../lib/field-mapping.json'
 
 const BUTTON_HOST_ID = 'sextant-autofill-root'
+let cachedProfile = null
 
 function sendMsg(msg) {
   return new Promise((resolve) => {
@@ -21,18 +22,22 @@ function normalize(text) {
 
 function getFieldLabel(el) {
   if (el.getAttribute('aria-label')) return el.getAttribute('aria-label')
+  if (el.getAttribute('placeholder')) return el.getAttribute('placeholder')
   if (el.id) {
     const lbl = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)
     if (lbl) return lbl.innerText || lbl.textContent
   }
   const parentLabel = el.closest('label')
   if (parentLabel) return parentLabel.innerText || parentLabel.textContent
-  const fieldset = el.closest('fieldset')
-  if (fieldset) {
-    const legend = fieldset.querySelector('legend')
+  // walk up to find a nearby label sibling
+  let node = el.parentElement
+  for (let i = 0; i < 4 && node; i++, node = node.parentElement) {
+    const lbl = node.querySelector('label')
+    if (lbl && !lbl.contains(el)) return lbl.innerText || lbl.textContent
+    const legend = node.querySelector('legend')
     if (legend) return legend.innerText || legend.textContent
   }
-  return el.placeholder || el.name || el.id || ''
+  return el.name || el.id || ''
 }
 
 function findBestMatch(labelText) {
@@ -54,40 +59,68 @@ function findBestMatch(labelText) {
   return { key: bestKey, confidence: bestScore }
 }
 
+function getFirstName(profile) {
+  if (profile.firstName) return profile.firstName
+  const name = profile.name || ''
+  return name.split(' ')[0] || ''
+}
+
+function getLastName(profile) {
+  if (profile.lastName) return profile.lastName
+  const name = profile.name || ''
+  const parts = name.trim().split(' ')
+  return parts.length > 1 ? parts.slice(1).join(' ') : ''
+}
+
 function getProfileValue(key, profile) {
-  const p = profile.personal || {}
   switch (key) {
-    case 'firstName':           return p.firstName || ''
-    case 'lastName':            return p.lastName || ''
-    case 'email':               return p.email || ''
-    case 'phone':               return p.phone || ''
-    case 'location':            return p.location || ''
-    case 'linkedinUrl':         return p.linkedinUrl || ''
-    case 'workAuthorization':   return p.workAuthorization || ''
-    case 'salaryExpectationMin': return String(p.salaryExpectationMin || '')
-    case 'summary':             return profile.summary || ''
-    case 'noticePeriod':        return ''
-    case 'whyThisCompany':      return ''
+    case 'firstName':         return getFirstName(profile)
+    case 'lastName':          return getLastName(profile)
+    case 'fullName':          return profile.name || `${getFirstName(profile)} ${getLastName(profile)}`.trim()
+    case 'email':             return profile.email || ''
+    case 'phone':             return profile.phone || ''
+    case 'location':          return profile.location || ''
+    case 'country': {
+      const loc = profile.location || ''
+      const parts = loc.split(',')
+      return parts.length > 1 ? parts[parts.length - 1].trim() : loc
+    }
+    case 'linkedinUrl':       return profile.linkedin || ''
+    case 'websiteUrl':        return profile.website || ''
+    case 'githubUrl':         return profile.github || ''
+    case 'currentTitle': {
+      const exp = (profile.experience || [])[0]
+      return exp?.roles?.[0]?.title || profile.title || ''
+    }
+    case 'currentCompany': {
+      const exp = (profile.experience || [])[0]
+      return exp?.company || ''
+    }
+    case 'yearsExperience':   return '19'
+    case 'workAuthorization': return profile.workAuthorization || 'Yes'
+    case 'salaryExpectation': return profile.salaryExpectation || ''
+    case 'noticePeriod':      return profile.noticePeriod || ''
+    case 'summary':           return profile.summary || ''
+    case 'whyThisCompany':    return ''
     case 'whyLeavingCurrentRole': return ''
-    default: return ''
+    default:                  return ''
   }
 }
 
 function isEssayField(el) {
-  return el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text')
+  return el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'search' || el.type === ''))
 }
 
 function fillInput(el, value) {
-  if (!value) return
-  const setter =
-    Object.getOwnPropertyDescriptor(
-      el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype,
-      'value'
-    )?.set
+  if (!value) return false
+  const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype
+  const setter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
   if (setter) setter.call(el, value)
   else el.value = value
   el.dispatchEvent(new Event('input', { bubbles: true }))
   el.dispatchEvent(new Event('change', { bubbles: true }))
+  el.dispatchEvent(new Event('blur', { bubbles: true }))
+  return true
 }
 
 function fillSelect(el, value) {
@@ -104,13 +137,10 @@ function fillSelect(el, value) {
 
 function markField(el, type) {
   el.parentElement?.querySelector('[data-sextant-mark]')?.remove()
-
   const colors = { filled: '#22c55e', unfilled: '#eab308', essay: '#3b82f6' }
   const icons  = { filled: '✓', unfilled: '?', essay: '✎' }
-
   el.style.outline = `2px solid ${colors[type]}`
   el.style.outlineOffset = '2px'
-
   const mark = document.createElement('span')
   mark.setAttribute('data-sextant-mark', type)
   mark.style.cssText = `
@@ -120,7 +150,6 @@ function markField(el, type) {
     position:absolute;top:-6px;right:-6px;z-index:9999;pointer-events:none;
   `
   mark.textContent = icons[type]
-
   const wrapper = el.parentElement
   if (wrapper && getComputedStyle(wrapper).position === 'static') wrapper.style.position = 'relative'
   wrapper?.appendChild(mark)
@@ -128,7 +157,6 @@ function markField(el, type) {
 
 async function addDraftButton(el, profile, jobDescription, jobId) {
   if (el.parentElement?.querySelector('[data-sextant-draft]')) return
-
   const btn = document.createElement('button')
   btn.setAttribute('data-sextant-draft', '1')
   btn.textContent = '✨ Draft with AI'
@@ -137,41 +165,94 @@ async function addDraftButton(el, profile, jobDescription, jobId) {
     background:#3b82f6;color:#fff;border:none;border-radius:6px;
     font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;
   `
-
-  btn.addEventListener('click', async () => {
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
     btn.textContent = 'Drafting…'
     btn.disabled = true
-
     const questionText = getFieldLabel(el)
     const payload = jobId
       ? { jobId, questionText }
       : { jobDescription: jobDescription || '', questionText }
-
     const res = await sendMsg({ type: 'DRAFT_ANSWER', payload })
-
     if (res?.error) {
       btn.textContent = `⚠ ${res.error.slice(0, 60)}`
       setTimeout(() => { btn.textContent = '✨ Draft with AI'; btn.disabled = false }, 4000)
       return
     }
-
     fillInput(el, res?.draft || '')
     markField(el, 'filled')
     btn.textContent = '✓ Drafted'
   })
-
   el.insertAdjacentElement('afterend', btn)
 }
 
-async function runAutofill() {
-  const profileRes = await sendMsg({ type: 'GET_PROFILE' })
-  if (!profileRes?.profile) {
-    alert('Sextant: Profile not loaded. Check your API settings.')
+function processField(el, profile, jobDescription, jobId) {
+  if (!el.offsetParent && el.type !== 'hidden') return
+  const label = getFieldLabel(el)
+  const { key, confidence } = findBestMatch(label)
+
+  if (el.tagName === 'SELECT') {
+    if (key && confidence > 0.4) {
+      const val = getProfileValue(key, profile)
+      markField(el, fillSelect(el, val) ? 'filled' : 'unfilled')
+    } else {
+      markField(el, 'unfilled')
+    }
     return
   }
-  const profile = profileRes.profile
 
-  // Try to find a saved job matching this page for AI draft context
+  if (key && confidence > 0.45) {
+    const val = getProfileValue(key, profile)
+    if (val) {
+      fillInput(el, val)
+      markField(el, 'filled')
+    } else if (isEssayField(el)) {
+      markField(el, 'essay')
+      addDraftButton(el, profile, jobDescription, jobId)
+    } else {
+      markField(el, 'unfilled')
+    }
+  } else if (isEssayField(el)) {
+    markField(el, 'essay')
+    addDraftButton(el, profile, jobDescription, jobId)
+  } else {
+    markField(el, 'unfilled')
+  }
+}
+
+async function loadProfile() {
+  if (cachedProfile) return cachedProfile
+  const res = await sendMsg({ type: 'GET_PROFILE' })
+  if (res?.profile) cachedProfile = res.profile
+  return cachedProfile
+}
+
+// Click-to-fill: clicking any input tries to fill it immediately
+function attachClickToFill(el, getCtx) {
+  if (el.dataset.sextantListening) return
+  el.dataset.sextantListening = '1'
+  el.addEventListener('focus', async () => {
+    const profile = await loadProfile()
+    if (!profile) return
+    const label = getFieldLabel(el)
+    const { key, confidence } = findBestMatch(label)
+    if (!key || confidence < 0.45) return
+    const val = getProfileValue(key, profile)
+    if (val && !el.value) {
+      fillInput(el, val)
+      markField(el, 'filled')
+    }
+  })
+}
+
+async function runAutofill() {
+  const profile = await loadProfile()
+  if (!profile) {
+    alert('Sextant: Profile not loaded. Check your API settings in the extension popup.')
+    return
+  }
+
   const jobsRes = await sendMsg({ type: 'GET_JOBS' })
   const jobs = jobsRes?.jobs || []
   const currentJob = jobs.find((j) => j.url && location.href.startsWith(j.url.split('?')[0]))
@@ -179,51 +260,25 @@ async function runAutofill() {
   const jobId = currentJob?.id
 
   const inputs = document.querySelectorAll(
-    'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]),' +
+    'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]):not([type=checkbox]):not([type=radio]),' +
     'textarea, select'
   )
+  inputs.forEach((el) => processField(el, profile, jobDescription, jobId))
+}
 
-  inputs.forEach((el) => {
-    if (!el.offsetParent) return
-
-    const label = getFieldLabel(el)
-    const { key, confidence } = findBestMatch(label)
-
-    if (el.tagName === 'SELECT') {
-      if (key && confidence > 0.5) {
-        const val = getProfileValue(key, profile)
-        markField(el, fillSelect(el, val) ? 'filled' : 'unfilled')
-      } else {
-        markField(el, 'unfilled')
-      }
-      return
-    }
-
-    if (key && confidence > 0.6) {
-      const val = getProfileValue(key, profile)
-      if (val) {
-        fillInput(el, val)
-        markField(el, 'filled')
-      } else {
-        markField(el, 'unfilled')
-        if (isEssayField(el)) addDraftButton(el, profile, jobDescription, jobId)
-      }
-    } else if (isEssayField(el)) {
-      markField(el, 'essay')
-      addDraftButton(el, profile, jobDescription, jobId)
-    } else {
-      markField(el, 'unfilled')
-    }
-  })
+function attachClickToFillAll() {
+  const inputs = document.querySelectorAll(
+    'input:not([type=hidden]):not([type=submit]):not([type=button]):not([type=reset]):not([type=file]):not([type=checkbox]):not([type=radio]),' +
+    'textarea'
+  )
+  inputs.forEach((el) => attachClickToFill(el))
 }
 
 function injectFloatingButton() {
   if (document.getElementById(BUTTON_HOST_ID)) return
-
   const host = document.createElement('div')
   host.id = BUTTON_HOST_ID
   document.body.appendChild(host)
-
   const shadow = host.attachShadow({ mode: 'closed' })
   shadow.innerHTML = `
     <style>
@@ -243,4 +298,10 @@ function injectFloatingButton() {
   shadow.getElementById('fab').addEventListener('click', runAutofill)
 }
 
+// Init
 injectFloatingButton()
+attachClickToFillAll()
+
+// Watch for dynamically added fields (single-page apps)
+const observer = new MutationObserver(() => attachClickToFillAll())
+observer.observe(document.body, { childList: true, subtree: true })
