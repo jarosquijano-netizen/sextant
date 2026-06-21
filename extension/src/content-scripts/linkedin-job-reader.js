@@ -4,12 +4,15 @@ const BADGE_ID = 'sextant-badge-root'
 
 function sendMsg(msg) {
   return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 5000)
     try {
       chrome.runtime.sendMessage(msg, (res) => {
+        clearTimeout(timer)
         if (chrome.runtime.lastError) resolve(null)
         else resolve(res)
       })
     } catch {
+      clearTimeout(timer)
       resolve(null)
     }
   })
@@ -204,13 +207,24 @@ function buildChipEl(score) {
 
 function parseAndScoreCards(profile) {
   const cards = document.querySelectorAll(
-    '.job-card-container:not([data-sextant-scored]), .jobs-search-results__list-item:not([data-sextant-scored])'
+    [
+      '.job-card-container:not([data-sextant-scored])',
+      '.jobs-search-results__list-item:not([data-sextant-scored])',
+      '[data-job-id]:not([data-sextant-scored])',
+      'li[class*="jobs-search"]:not([data-sextant-scored])',
+    ].join(', ')
   )
   cards.forEach((card) => {
     card.setAttribute('data-sextant-scored', '1')
-    const titleEl = card.querySelector('.job-card-list__title, .job-card-container__link')
-    const companyEl = card.querySelector('.job-card-container__primary-description, .artdeco-entity-lockup__subtitle')
-    const snippetEl = card.querySelector('.job-card-list__insight, .job-card-container__metadata-item')
+    const titleEl = card.querySelector(
+      '.job-card-list__title, .job-card-container__link, [class*="job-card"][class*="title"], a[href*="/jobs/view/"]'
+    )
+    const companyEl = card.querySelector(
+      '.job-card-container__primary-description, .artdeco-entity-lockup__subtitle, [class*="primary-description"], [class*="company-name"]'
+    )
+    const snippetEl = card.querySelector(
+      '.job-card-list__insight, .job-card-container__metadata-item, [class*="insight"], [class*="metadata-item"]'
+    )
 
     const jobData = {
       title: titleEl?.innerText?.trim() || '',
@@ -233,15 +247,23 @@ function parseIndividualPosting() {
   const titleEl =
     document.querySelector('.job-details-jobs-unified-top-card__job-title h1') ||
     document.querySelector('.job-details-jobs-unified-top-card__job-title') ||
+    document.querySelector('[class*="top-card"][class*="job-title"]') ||
+    document.querySelector('h1.t-24') ||
     document.querySelector('h1')
   const companyEl =
     document.querySelector('.job-details-jobs-unified-top-card__company-name') ||
-    document.querySelector('.jobs-unified-top-card__company-name')
+    document.querySelector('.jobs-unified-top-card__company-name') ||
+    document.querySelector('[class*="top-card"][class*="company-name"]') ||
+    document.querySelector('[class*="company-name"] a')
   const descEl =
     document.querySelector('.jobs-description__content') ||
     document.querySelector('.jobs-box__html-content') ||
-    document.querySelector('#job-details')
-  const locationEl = document.querySelector('.job-details-jobs-unified-top-card__bullet')
+    document.querySelector('#job-details') ||
+    document.querySelector('[class*="jobs-description"]') ||
+    document.querySelector('[id*="job-details"]')
+  const locationEl =
+    document.querySelector('.job-details-jobs-unified-top-card__bullet') ||
+    document.querySelector('[class*="top-card"][class*="bullet"]')
 
   return {
     title: titleEl?.innerText?.trim() || '',
@@ -253,7 +275,12 @@ function parseIndividualPosting() {
 }
 
 async function init() {
-  const res = await sendMsg({ type: 'GET_PROFILE' })
+  let res = await sendMsg({ type: 'GET_PROFILE' })
+  if (!res?.profile) {
+    // Service worker may have been sleeping — retry once after a short delay
+    await new Promise((r) => setTimeout(r, 1500))
+    res = await sendMsg({ type: 'GET_PROFILE' })
+  }
   if (!res?.profile) return
   const profile = res.profile
 
